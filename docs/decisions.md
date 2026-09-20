@@ -32,3 +32,15 @@
   1. Ensures all data stored in SQL is canonical (lowercase emails, uppercase employee numbers).
   2. Harmonizes application validation and database unique index semantics—because values are normalized prior to DB operations, SQLite's binary unique index triggers atomically even if validation is bypassed.
   3. Simple, maintainable, zero external gems, works across SQLite and PostgreSQL.
+
+## Decision 5: `dependent: :restrict_with_error` for Employee-SalaryRecord Association
+
+* **Context**: Salary management requires maintaining audit history of past compensation revisions. Silently deleting salary records when an employee is deleted violates audit integrity.
+* **Decision**: Configure `has_many :salary_records, dependent: :restrict_with_error` on `Employee`.
+* **Rationale**: Prevents accidental physical deletion of employees with associated salary records at the Rails layer by adding a validation error instead of cascading deletion.
+
+## Decision 6: Model-Level Validation for Non-Overlapping Salary Date Ranges
+
+* **Context**: An employee cannot have two active or overlapping salary records covering the same period.
+* **Decision**: Implement a model-level custom validation (`no_overlapping_salary_periods`) in `SalaryRecord`.
+* **Rationale**: SQLite does not support native PostgreSQL `EXCLUDE USING gist` date range exclusion constraints. Implementing the date overlap validation in Active Record provides portable, cross-database protection without introducing database-specific SQL extensions or complex gems.

@@ -27,19 +27,39 @@
 4. `employees_on_department`: Optimizes filtering and aggregated analytics grouping by department (`WHERE department = ?`).
 5. `employees_on_status`: Speeds up filtering active vs inactive staff (`WHERE status = 'active'`).
 
-### 3. Model Architecture & Normalization (`app/models/employee.rb`)
+---
 
-* **Status Enum**: Implemented via Rails string-backed enum `enum :status, { active: "active", inactive: "inactive" }, default: "active"`. Stores human-readable string values directly in SQL while providing query helpers (`active?`, `inactive!`, `Employee.active`).
-* **Attribute Normalization**: Callbacks (`before_validation` and `before_save`) automatically canonicalize attribute values:
-  * `email`: Stripped of whitespace and downcased (`" RAHUL.SHARMA@ACME.COM "` $\rightarrow$ `"rahul.sharma@acme.com"`).
-  * `employee_number`: Stripped of whitespace and uppercased (`" emp-000001 "` $\rightarrow$ `"EMP-000001"`).
-  * `first_name`, `last_name`: Stripped of leading/trailing whitespace.
-* **Validations**:
-  * `employee_number`: Required (`presence: true`), case-insensitive uniqueness (`uniqueness: { case_sensitive: false }`).
-  * `first_name`, `last_name`, `country`, `department`, `job_title`, `employment_type`: Required (`presence: true`).
-  * `email`: Required (`presence: true`), case-insensitive uniqueness (`uniqueness: { case_sensitive: false }`), validated against `URI::MailTo::EMAIL_REGEXP`.
-  * `status`: Required (`presence: true`), restricted to `%w[active inactive]`.
+## Phase 3: SalaryRecord Domain & Associations
+
+### 1. Database Schema (`salary_records` table)
+
+| Column | Type | Options | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | integer | primary key, auto-increment | Internal surrogate primary key |
+| `employee_id` | integer | null: false, foreign key, index | Foreign key referencing `employees.id` |
+| `amount` | decimal(12, 2) | null: false | Salary compensation amount (must be > 0) |
+| `currency` | string | null: false | ISO currency code (e.g. `INR`, `USD`, `EUR`) |
+| `effective_from` | date | null: false | Start date of salary period |
+| `effective_to` | date | null: true | End date of salary period (`NULL` indicates current active salary) |
+| `created_at` | datetime | null: false | Auto-managed creation timestamp |
+| `updated_at` | datetime | null: false | Auto-managed update timestamp |
+
+### 2. Relational Architecture & Associations
+
+* **Employee $\rightarrow$ SalaryRecords**: `has_many :salary_records, dependent: :restrict_with_error`.
+  * *Rationale*: Preserves historical compensation data by preventing accidental physical deletion of employees with active or historic salary records.
+* **SalaryRecord $\rightarrow$ Employee**: `belongs_to :employee`.
+  * *Foreign Key Constraint*: Database-level foreign key (`add_foreign_key :salary_records, :employees`) prevents orphan salary records referencing non-existent employee IDs.
+
+### 3. Business Rules & Model Validations
+
+1. **Amount Validation**: Required (`presence: true`), must be strictly positive (`numericality: { greater_than: 0 }`).
+2. **Currency Validation**: Required (`presence: true`), normalized to uppercase (`before_validation :normalize_currency`), and restricted to supported ISO codes (`INR`, `USD`, `EUR`, `GBP`, `AUD`, `CAD`, `SGD`, `AED`).
+3. **Effective Date Ordering**: `effective_from` is required. If `effective_to` is provided, `effective_to` must be $\ge$ `effective_from`.
+4. **Non-Overlapping Salary Period Rule**: Validates that an employee cannot have two salary records with overlapping date ranges $[A_{from}, A_{to}]$ and $[B_{from}, B_{to}]$.
+   * *Overlap condition*: `(B.end.nil? || A.start <= B.end) && (A.end.nil? || B.start <= A.end)`.
+   * *SQLite Exclusion Constraint Trade-Off*: Model-level validation is used because SQLite lacks native `EXCLUDE USING gist` range exclusion constraints available in PostgreSQL.
 
 ### 4. Verification Suite
 
-* RSpec model spec at [spec/models/employee_spec.rb](file:///f:/Salary_Management/backend/spec/models/employee_spec.rb) covering valid attributes, presence of required attributes, case-insensitive uniqueness, email format validation, attribute normalization callbacks, enum status behavior, DB constraint consistency, and database persistence/retrieval (26 examples, 0 failures).
+* RSpec suite at [spec/models/salary_record_spec.rb](file:///f:/Salary_Management/backend/spec/models/salary_record_spec.rb) and [spec/models/employee_spec.rb](file:///f:/Salary_Management/backend/spec/models/employee_spec.rb) covering 44 total test cases with 0 failures.

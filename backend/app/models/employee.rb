@@ -1,6 +1,8 @@
 class Employee < ApplicationRecord
   enum :status, { active: "active", inactive: "inactive" }, default: "active"
 
+  has_many :salary_records, dependent: :restrict_with_error
+
   before_validation :normalize_attributes
   before_save :normalize_attributes
 
